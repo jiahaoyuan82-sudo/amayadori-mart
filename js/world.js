@@ -274,17 +274,16 @@ function drawProductUnit(pid, x, y, z, k) {
   }
 }
 
-/** 某个货架上要画哪些商品格子 (按库存比例) */
-function unitsFor(cat, slots) {
-  const list = carriedIn(cat);
-  if (!list.length) return [];
-  const q = Math.max(1, Math.floor(slots / list.length));
-  const out = [];
-  for (const p of list) {
-    const n = Math.ceil(G.inv[p.id].shelf / SHELF_CAP * q);
-    for (let i = 0; i < q; i++) out.push(i < n ? p.id : null);
+/** 某个货架每一格画什么 (按陈列计划和库存) */
+function unitsFor(fid, slots) {
+  const arr = (G.plan && G.plan[fid]) || [], seen = {}, out = [];
+  for (let i = 0; i < slots; i++) {
+    const pid = arr[i];
+    if (!pid) { out.push(null); continue; }
+    const k = seen[pid] = (seen[pid] || 0) + 1;
+    out.push(G.inv[pid] && G.inv[pid].shelf > (k - 1) * PER_FACE ? pid : null);
   }
-  return out.slice(0, slots);
+  return out;
 }
 
 function drawLabel(text, color, x, y, z, w, along) {
@@ -343,7 +342,7 @@ function drawFixture(cat) {
       const tiers = [0.2, 0.75, 1.3];
       const dw = (w - 0.16) / 7;
       for (let t = 0; t < 3; t++) for (let c = 0; c < 7; c++) {
-        const pid = units[c * 3 + t];
+        const pid = units[t * 7 + c];
         if (pid) drawProductUnit(pid, x + 0.16 + c * dw, fy - 0.15, tiers[t], c);
       }
       for (let i = 0; i <= 7; i++) faceY(x + 0.06 + i * dw, x + 0.1 + i * dw, 0.12, h - 0.2, fy + 0.002, '#9aa3ad', A);
@@ -376,7 +375,7 @@ function drawFixture(cat) {
     case 'mag': {
       box(x, y, 0, w, d, 0.55, '#8a6d5a', { top: '#a5876f', amb: AMB_IN });
       box(x, y + 0.04, 0.55, w, 0.12, 0.4, '#7a5f4e', A);
-      units.forEach((pid, i) => pid && drawProductUnit(pid, x + 0.1 + (i % 10) * 0.27, y + 0.2, 0.55, i));
+      units.forEach((pid, i) => pid && drawProductUnit(pid, x + 0.1 + (i % 5) * 0.54 + Math.floor(i / 5) * 0.27, y + 0.2 - Math.floor(i / 5) * 0.08, 0.55, i));
       faceY(x, x + w, 0.38, 0.5, y + d + 0.002, C.color, A);
       planeY(x + 0.05, y + d + 0.004, 0.49, g => { g.fillStyle = '#fff'; g.font = `bold 10px ${FONT}`; g.textBaseline = 'top'; g.fillText('MAGAZINE · 雑誌 · 新聞', 4, 1); });
       break;

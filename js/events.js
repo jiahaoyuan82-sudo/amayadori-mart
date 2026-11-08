@@ -106,7 +106,7 @@ function maybeEvent(hour) {
 
 /* ---- 小偷 ---- */
 function evThief() {
-  const pool = PRODUCTS.filter(p => G.unlocked[p.cat] && G.carried[p.id] && CAT_BY_ID[p.cat].stand && G.inv[p.id].shelf > 0);
+  const pool = PRODUCTS.filter(p => p.cat !== 'hot' && displayed(p.id) && G.inv[p.id].shelf > 0);
   if (!pool.length) return;
   const wants = [pick(pool).id];
   const c = spawnCustomer({ wants, look: { ...randomLook(), shirt: '#2b2b2b', pants: '#1b1b1b', cap: '#1b1b1b', glasses: false }, flags: { thief: true }, speed: 0.95 });
@@ -122,7 +122,7 @@ function thiefEscape(c) {
 function catchThief(c) {
   if (c.caught) return;
   c.caught = true; c.thief = false;
-  for (const g of c.got) G.inv[g.pid].shelf = Math.min(SHELF_CAP, G.inv[g.pid].shelf + 1);
+  for (const g of c.got) G.inv[g.pid].shelf = Math.min(shelfCap(g.pid), G.inv[g.pid].shelf + 1);
   c.got = []; c.wants = [];
   say(clerkPerson(), '站住！放下东西！', 'shout', 2.6);
   sayLater(1.2, c, '对、对不起…', 'normal', 2.4);
@@ -198,8 +198,10 @@ function evRush() {
 
 /* ---- 网红 ---- */
 function evInfluencer() {
-  const hotOk = G.unlocked.hot && carriedIn('hot').length;
-  const wants = hotOk ? [pick(carriedIn('hot')).id] : [pick(PRODUCTS.filter(p => G.unlocked[p.cat] && G.carried[p.id] && CAT_BY_ID[p.cat].stand)).id];
+  const hots = carriedIn('hot').filter(p => displayed(p.id));
+  const others = PRODUCTS.filter(p => p.cat !== 'hot' && displayed(p.id));
+  if (!hots.length && !others.length) return;
+  const wants = hots.length ? [pick(hots).id] : [pick(others).id];
   const c = spawnCustomer({ wants, look: { ...randomLook(), shirt: '#ff8fab', glasses: true }, flags: { influencer: true } });
   sayLater(1.5, c, '家人们，今天来探店啦！', 'shout', 3);
   toast('📱 好像有网红来探店了…好好招待！');

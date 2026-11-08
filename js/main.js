@@ -149,7 +149,8 @@ function drawRain() {
 function demandWeight(p) {
   if (!G.unlocked[p.cat] || !G.carried[p.id]) return 0;
   const h = G.minute / 60, T = G.temp == null ? 15 : G.temp;
-  let w = p.pop;
+  let w = p.pop * ((G.trend && G.trend[p.id]) || 1) * visibility(p.id);
+  if (!w) return 0;
   if (p.morning && h >= 6 && h < 10) w *= 1.8;
   if (p.lunch && h >= 11 && h < 14) w *= 1 + p.lunch;
   if (p.night && (h >= 20 || h < 4)) w *= 1 + p.night;
@@ -169,16 +170,17 @@ function chooseWants() {
     out.push(it[0].id);
     pool.splice(pool.indexOf(it), 1);
   }
-  const shelf = out.filter(id => CAT_BY_ID[PRODUCT_BY_ID[id].cat].stand);
-  const hot = out.filter(id => !CAT_BY_ID[PRODUCT_BY_ID[id].cat].stand);
-  shelf.sort((a, b) => CAT_BY_ID[PRODUCT_BY_ID[a].cat].stand[1] - CAT_BY_ID[PRODUCT_BY_ID[b].cat].stand[1]);
+  const shelf = out.filter(id => PRODUCT_BY_ID[id].cat !== 'hot');
+  const hot = out.filter(id => PRODUCT_BY_ID[id].cat === 'hot');
+  const yOf = id => { const f = facingList(id)[0]; return f && CAT_BY_ID[f.fid].stand ? CAT_BY_ID[f.fid].stand[1] : 9; };
+  shelf.sort((a, b) => yOf(a) - yOf(b));
   return [shelf, hot];
 }
 
 function spawnCustomer(opt = {}) {
   const fromLeft = opt.fromLeft ?? Math.random() < 0.5, sx = fromLeft ? 0.05 : BOARD.w - 0.05;
   let [wants, hot] = chooseWants();
-  if (opt.wants) { wants = opt.wants.filter(id => CAT_BY_ID[PRODUCT_BY_ID[id].cat].stand); hot = opt.wants.filter(id => !CAT_BY_ID[PRODUCT_BY_ID[id].cat].stand); }
+  if (opt.wants) { wants = opt.wants.filter(id => PRODUCT_BY_ID[id].cat !== 'hot'); hot = opt.wants.filter(id => PRODUCT_BY_ID[id].cat === 'hot'); }
   const lane = LANE_CUSTOMER + rand(-0.12, 0.12);
   const c = {
     kind: 'customer', x: sx, y: lane, look: opt.look ? { ...randomLook(), ...opt.look } : randomLook(), wants, hot, got: [],
@@ -288,11 +290,13 @@ function commonPersonUpdate(p, dt) {
 }
 
 function goNext(c) {
+  while (c.wants.length && !displayed(c.wants[0])) {     // 想买的东西没摆出来 → 找不到
+    G.fin.today.lostStock++; G.fin.today.lostValue += G.price[c.wants[0]]; c.mood -= 0.5; c.wants.shift();
+  }
   if (c.wants.length) {
-    const cat = PRODUCT_BY_ID[c.wants[0]].cat;
-    const sp = standFor(cat);
-    c.path = navPath(c.x, c.y, sp[0], sp[1]);
-    c.face = faceFor(cat);
+    const spot = pickSpot(c.wants[0]);
+    c.path = navPath(c.x, c.y, spot.pos[0], spot.pos[1]);
+    c.face = faceFor(spot.fid);
     c.state = 'toShelf';
   } else if (c.thief) {
     leave(c, 0); c.speed = 1.05;
@@ -344,7 +348,7 @@ function tryTake(c, final) {
   let r = takeItem(c, pid);
   if (r === 'empty') {
     // 同类替代品
-    const alt = carriedIn(PRODUCT_BY_ID[pid].cat).filter(p => p.id !== pid && G.inv[p.id].shelf > 0);
+    const alt = carriedIn(PRODUCT_BY_ID[pid].cat).filter(p => p.id !== pid && displayed(p.id) && G.inv[p.id].shelf > 0);
     if (alt.length && Math.random() < 0.55) {
       const a = pick(alt);
       if (takeItem(c, a.id) === 'ok') { c.wants.shift(); floatAt(c, `换成${a.emoji}`, '#cde7ff'); goNext(c); return true; }
@@ -380,6 +384,7 @@ function checkout(c, staff) {
   for (const g of c.got) { total += g.price; recordSale(g.pid, g.price); }
   total = r1(total);
   G.money = r1(G.money + total); G.served++; G.fin.today.buyers++;
+  if (typeof earn === 'function') earn(total);
   let repGain = c.mood < 0 ? 0.001 : 0.006;
   if (staff) repGain += statEff(staff, 'service') * 0.0015;
   G.rep = clamp(G.rep + repGain, 0, 5);
@@ -471,10 +476,11 @@ function playerRestock(cat) {
   const [x, y, z, w, d, h] = C.box;
   const [sx, sy] = proj(x + w / 2, y + d / 2, z + h + 0.6);
   const st = catState(cat);
-  if (!st.n) { toast(`${C.name}还没有在售商品，去「进货」订货吧`); return; }
-  if (st.shelf >= st.cap) { toast(`${C.name}货架已经摆满了`); return; }
+  const FN = FIX[cat].name;
+  if (!st.n) { toast(`「${FN}」上还没摆商品，去「管理货架」安排吧`); return; }
+  if (st.shelf >= st.cap) { toast(`「${FN}」已经摆满了`); return; }
   const n = restockCat(cat);
-  if (!n) { toast(`📦 仓库里没有${C.name}的货了，去「进货」订货吧`); Sound.angry(); return; }
+  if (!n) { toast(`📦 仓库里没有「${FN}」上这些商品的货了，去「进货」订货吧`); Sound.angry(); return; }
   addFloat(sx, sy, `⬆ 上架 ${n} 件`, '#9ff0c8');
   Sound.restock();
   if (navigator.vibrate) navigator.vibrate(12);
@@ -531,6 +537,7 @@ function update(dt) {
   G.rain = clamp(G.rain + clamp(G.rainTarget - G.rain, -dt * 0.25, dt * 0.25), 0, 1);
   G.cut = clamp(G.cut + clamp(G.cutTarget - G.cut, -dt * 1.5, dt * 1.5), 0, 1);
   Sound.setRain(G.snow ? 0 : G.rain);
+  if ((G.time % 2) < dt) Sound.setNight(env.night);
 
   if (adt > 0) computeSeparation([...G.customers, ...G.passers, ...Object.values(G.staffRT || {})]);
   for (const c of G.customers) updateCustomer(c, adt);
@@ -703,7 +710,7 @@ function drawUI() {
   }
   if (!IS_TOUCH && G.hover && G.hover.type === 'fix' && pointer.x != null) {
     const C = CAT_BY_ID[G.hover.cat], st = catState(C.id);
-    const txt = catNeedsRestock(C.id, 1) ? `点击上架：从仓库补到货架（仓库 ${st.back} 件）` : st.back ? `${C.name} 已摆满` : `仓库没货了，去「进货」订货`;
+    const txt = catNeedsRestock(C.id, 1) ? `「${FIX[C.id].name}」点击上架（仓库 ${st.back} 件）` : st.back ? `「${FIX[C.id].name}」已摆满` : `「${FIX[C.id].name}」仓库没货了，去「进货」订货`;
     c.font = `bold 13px ${FONT}`;
     const w = c.measureText(txt).width + 16;
     c.fillStyle = 'rgba(15,20,30,0.88)'; roundRect(c, pointer.x + 14, pointer.y + 14, w, 26, 8); c.fill();

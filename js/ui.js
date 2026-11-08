@@ -17,11 +17,28 @@ function updateHUD() {
   const W = WEATHER[todayWx().type];
   const icon = G.rain > 0.3 ? (G.snow ? '❄️' : '☔') : W.rain > 0.3 ? '☁️' : nightness(m / 60) > 0.5 ? '🌙' : W.icon;
   setText('day', `${dateLabel(G.day)} ${icon} ${Math.round(G.temp ?? 15)}°`);
-  setText('money', yen(G.money).replace('¥', ''));
+  // 金额滚动动画
+  const shown = hudCache.moneyShown ?? G.money;
+  const nv = Math.abs(G.money - shown) < 0.15 ? G.money : shown + (G.money - shown) * 0.18;
+  hudCache.moneyShown = nv;
+  setText('money', yen(nv).replace('¥', ''));
+  const inc = r1(G.fin.today.sales + (G.fin.today.vend || 0));
+  setText('income', yen(inc));
+  const pct = clamp(inc / G.goal, 0, 1);
+  const pw = Math.round(pct * 100) + '%';
+  if (hudCache.goalW !== pw) { hudCache.goalW = pw; $('goalbar').style.width = pw; }
+  setText('goaltext', G.goalHit ? `🎉 已达成目标 ${yen(G.goal)}` : `今日目标 ${yen(G.goal)} · ${Math.round(pct * 100)}%`);
+  setText('streak', G.streak > 0 ? `🔥 连续 ${G.streak} 天` : '');
+  $('hud-money').classList.toggle('hit', !!G.goalHit);
+  if (!G.goalHit && inc >= G.goal) celebrateGoal();
+  flushEarn();
   const full = Math.round(G.rep * 2) / 2;
   setText('rep', '★'.repeat(Math.floor(full)) + (full % 1 ? '☆' : '') + '·'.repeat(5 - Math.ceil(full)) + ` ${G.rep.toFixed(1)}`);
-  setText('today', `今日 ${G.todayCustomers} 人 · ${yen(G.fin.today.sales)}`);
+  setText('today', `今日 ${G.todayCustomers} 人`);
+  const undisplayed = PRODUCTS.filter(p => G.carried[p.id] && G.unlocked[p.cat] && !displayed(p.id)).length;
+  $('btn-shelf').classList.toggle('unread', undisplayed > 0);
   const lowCats = CATEGORIES.filter(c => G.unlocked[c.id] && catState(c.id).empty).length;
+  $('btn-news').classList.toggle('unread', !!G.news && G.newsSeen !== G.news.day);
   $('btn-order').classList.toggle('alert', lowCats > 0 && G.orders.length === 0);
 }
 
@@ -47,13 +64,47 @@ $('btn-staff').onclick = () => { Sound.click(); openPanel('staff'); };
 $('btn-fin').onclick = () => { Sound.click(); openPanel('fin'); };
 $('btn-weather').onclick = () => { Sound.click(); openPanel('weather'); };
 $('btn-menu').onclick = () => { Sound.click(); showMenu(); };
+$('btn-news').onclick = () => { Sound.click(); openPanel('news'); };
+$('btn-shelf').onclick = () => { Sound.click(); openPanel('shelf'); };
+
+/* ---------------- 赚钱反馈 ---------------- */
+let earnBuf = 0, earnT = 0;
+function earn(amount) { earnBuf += amount; }
+function flushEarn() {
+  const now = performance.now();
+  if (earnBuf <= 0 || now - earnT < 450) return;
+  earnT = now;
+  const el = document.createElement('div');
+  el.className = 'mpop'; el.textContent = '+' + yen(r1(earnBuf));
+  $('hud-money').appendChild(el);
+  setTimeout(() => el.remove(), 1300);
+  $('money').classList.remove('bump'); void $('money').offsetWidth; $('money').classList.add('bump');
+  earnBuf = 0;
+}
+function celebrateGoal() {
+  G.goalHit = true; G.streak = (G.streak || 0) + 1;
+  G.rep = clamp(G.rep + 0.05, 0, 5);
+  toast(`🎉 今日目标 ${yen(G.goal)} 达成！${G.streak > 1 ? `连续 ${G.streak} 天 🔥` : ''}（口碑 +）`);
+  Sound.fanfare();
+  const box = $('confetti'), cols = ['#f4a261', '#2a9d8f', '#e63946', '#ffd166', '#8ecae6', '#ff8fab'];
+  for (let i = 0; i < 46; i++) {
+    const d = document.createElement('i');
+    d.style.left = (40 + Math.random() * 60) + '%';
+    d.style.background = cols[i % cols.length];
+    d.style.animationDelay = (Math.random() * 0.4) + 's';
+    d.style.setProperty('--dx', (Math.random() * 240 - 160) + 'px');
+    d.style.setProperty('--rot', (Math.random() * 720) + 'deg');
+    box.appendChild(d);
+    setTimeout(() => d.remove(), 2400);
+  }
+}
 
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') { if (!$('modal').classList.contains('hidden')) closeModal(); else if (G.started) showMenu(); return; }
   if (!G.started || !$('modal').classList.contains('hidden')) return;
   if (e.code === 'Space') { e.preventDefault(); togglePause(); }
   if (e.key === 'r' || e.key === 'R') toggleRoof();
-  const k = { '1': 'order', '2': 'staff', '3': 'fin', '4': 'weather' }[e.key];
+  const k = { '1': 'order', '2': 'staff', '3': 'fin', '4': 'weather', '5': 'news', '6': 'shelf' }[e.key];
   if (k) openPanel(k);
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); manualSave(); }
 });
@@ -90,7 +141,8 @@ function showMenu() {
     <div class="grid">
       <button data-a="resume" class="primary wide">▶ 继续游戏</button>
       <button data-a="save">💾 立即保存</button>
-      <button data-a="sound">${Sound.muted ? '🔇 声音：关' : '🔊 声音：开'}</button>
+      <button data-a="sound">${Sound.muted ? '🔇 全部声音：关' : '🔊 全部声音：开'}</button>
+      <button data-a="music">${Sound.musicOn ? '🎵 背景音乐：开' : '🎵 背景音乐：关'}</button>
       <button data-a="roof">🏠 ${G.cutTarget > 0.5 ? '盖上屋顶' : '掀开屋顶'}</button>
       <button data-a="view">⌖ 重置视角</button>
       <button data-a="manga" class="wide">🎨 画风：${MANGA.on ? '漫画风（点我切回普通）' : '普通（点我试试漫画风）'}</button>
@@ -103,6 +155,7 @@ function showMenu() {
   on(b, 'resume', closeModal);
   on(b, 'save', () => { closeModal(); manualSave(); });
   on(b, 'sound', () => { Sound.setMuted(!Sound.muted); showMenuKeepPause(); });
+  on(b, 'music', () => { Sound.setMusic(!Sound.musicOn); try { localStorage.setItem('amayadori-music', Sound.musicOn ? '1' : '0'); } catch (e) { } showMenuKeepPause(); });
   on(b, 'roof', () => { toggleRoof(); closeModal(); });
   on(b, 'help', () => showHelp(false));
   on(b, 'manga', () => { setManga(!MANGA.on); showMenu(); });
@@ -135,7 +188,8 @@ function snapshot() {
     inv: G.inv, price: G.price, carried: G.carried, costMult: G.costMult, unlocked: G.unlocked,
     orders: G.orders.map(o => ({ pid: o.pid, qty: o.qty, eta: o.eta })), staff: G.staff, candidates: G.candidates, nextId: G.nextId,
     wx: G.wx, fin: G.fin, todayTarget: G.todayTarget, rainTarget: G.rainTarget, snow: G.snow, savedAt: Date.now(),
-    vend: G.vend, regulars: G.regulars, buzz: G.buzz,
+    plan: G.plan, goal: G.goal, goalHit: G.goalHit, streak: G.streak,
+    vend: G.vend, regulars: G.regulars, buzz: G.buzz, news: G.news, newsArchive: G.newsArchive, trend: G.trend, newsSeen: G.newsSeen,
   };
 }
 function sanitize(d) {
@@ -144,7 +198,7 @@ function sanitize(d) {
   const inv = {}, price = {}, carried = {}, costMult = {};
   for (const p of PRODUCTS) {
     const i = d.inv[p.id] || {};
-    inv[p.id] = { shelf: Math.round(num(i.shelf, 0, SHELF_CAP, 0)), back: Math.round(num(i.back, 0, 1e5, 0)) };
+    inv[p.id] = { shelf: Math.round(num(i.shelf, 0, 1e4, 0)), back: Math.round(num(i.back, 0, 1e5, 0)) };
     price[p.id] = Math.round(num(d.price && d.price[p.id], 10, 1e5, p.price));
     carried[p.id] = !!(d.carried && d.carried[p.id]);
     costMult[p.id] = num(d.costMult && d.costMult[p.id], 0.5, 2, 1);
@@ -162,6 +216,10 @@ function sanitize(d) {
     todayTarget: num(d.todayTarget, 0, 1e4, 80), rainTarget: num(d.rainTarget, 0, 1, 0), snow: !!d.snow,
     vend: VEND_DEFS.map((v, i) => { const s = (d.vend || [])[i] || {}; return { stock: Math.round(num(s.stock, 0, v.cap, 20)), price: num(s.price, 0.5, 100, v.price), cap: v.cap, sold: Math.round(num(s.sold, 0, 1e6, 0)) }; }),
     regulars: d.regulars && typeof d.regulars === 'object' ? d.regulars : {}, buzz: Math.round(num(d.buzz, 0, 9, 0)),
+    news: d.news && Array.isArray(d.news.items) ? d.news : null, newsArchive: Array.isArray(d.newsArchive) ? d.newsArchive.slice(0, 7) : [],
+    trend: d.trend && typeof d.trend === 'object' ? d.trend : {}, newsSeen: Math.round(num(d.newsSeen, 0, 1e6, 0)),
+    plan: d.plan ? sanitizePlan(d.plan) : null,
+    goal: num(d.goal, 100, 1e7, 600), goalHit: !!d.goalHit, streak: Math.round(num(d.streak, 0, 1e5, 0)),
   };
 }
 function save() {
@@ -220,6 +278,8 @@ function showImport() {
 
 function applySave(d) {
   Object.assign(G, d);
+  if (!G.plan) defaultPlan();
+  for (const p of PRODUCTS) clampShelf(p.id);
   G.customers = []; G.queue = []; G.staffRT = {}; G.trucks = []; G.floorItems = []; G.cat = null; G.talks = [];
   for (const v of G.vend) v.sold = 0;
   G.lastHour = Math.floor(G.minute / 60);
@@ -228,6 +288,7 @@ function applySave(d) {
   for (let dd = G.day; dd <= G.day + 14; dd++) if (!G.wx[dd].f) G.wx[dd].f = makeForecast(dd, dd - G.day);
   if (!G.wx[G.day].f0) G.wx[G.day].f0 = { ...G.wx[G.day].f };
   if (!G.fin.today || G.fin.today.day !== G.day) G.fin.today = newFinDay();
+  if (!G.news || G.news.day !== G.day) generateNews();
   G.temp = tempNow();
 }
 
@@ -255,6 +316,7 @@ function startGame(data) {
   try { seen = !!localStorage.getItem(TUTORIAL_KEY); } catch (e) { }
   if (!seen) setTimeout(() => showHelp(true), 900);
   else toast(data ? `おかえりなさい！第 ${G.day} 天继续营业` : 'いらっしゃいませ！开店营业');
+  setTimeout(() => G.started && toast('📰 今天的「雨宿日报」到了，点左边的「新闻」看看'), 4000);
 }
 
 $('btn-start').onclick = () => {
@@ -269,7 +331,9 @@ refreshTitle();
 // 切到后台 / 锁屏: 自动保存并暂停 (手机上很重要)
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && G.started) { save(); if (!G.paused && modalPrevPause === null) togglePause(true); }
+  if (Sound.ctx) { if (document.hidden) Sound.ctx.suspend(); else Sound.ctx.resume(); }
 });
+try { if (localStorage.getItem('amayadori-music') === '0') Sound.musicOn = false; } catch (e) { }
 window.addEventListener('pagehide', () => { if (G.started) save(); });
 
 /* ---------------- 画风切换 ---------------- */

@@ -59,7 +59,7 @@ const STAFF_EXIT = [[13.55, 2.55], [11.8, 2.6]];
 function initEconomy() {
   G.inv = {}; G.price = {}; G.carried = {}; G.costMult = {};
   for (const p of PRODUCTS) {
-    G.inv[p.id] = { shelf: p.start ? SHELF_CAP : 0, back: p.start ? Math.round(p.box * 0.5) : 0 };
+    G.inv[p.id] = { shelf: 0, back: p.start ? Math.round(p.box * 0.5) : 0 };
     G.price[p.id] = p.price; G.carried[p.id] = !!p.start; G.costMult[p.id] = 1;
   }
   G.unlocked = {};
@@ -67,6 +67,9 @@ function initEconomy() {
   G.orders = []; G.staff = []; G.candidates = []; G.nextId = 1;
   G.vend = VEND_DEFS.map(d => ({ stock: 28, price: d.price, cap: d.cap }));
   G.regulars = {}; G.buzz = 0; G.floorItems = [];
+  G.goal = 600; G.goalHit = false; G.streak = 0;
+  defaultPlan();
+  for (const p of PRODUCTS) if (p.start) G.inv[p.id].shelf = shelfCap(p.id);
   G.wx = {}; G.fin = { today: null, history: [] };
   G.money = START_MONEY; G.rep = 3; G.day = 1; G.minute = 7 * 60; G.served = 0;
 }
@@ -83,7 +86,11 @@ function placeOrder(pid, boxes = 1, silent) {
   const cost = r1(costOf(pid) * p.box * boxes);
   if (G.money < cost) { if (!silent) toast('💸 钱不够了'); return false; }
   G.money -= cost; G.fin.today.purchase += cost;
-  G.carried[pid] = true;
+  if (!G.carried[pid] || !displayed(pid)) {
+    G.carried[pid] = true;
+    const f = autoPlace(pid);
+    if (f && !silent) toast(`🗂 ${p.emoji}${p.name} 已自动摆到「${FIX[f].name}」，可在「管理货架」调整`);
+  }
   G.orders.push({ pid, qty: p.box * boxes, eta: absMin() + randInt(40, 80) });
   return true;
 }
@@ -91,9 +98,9 @@ function placeOrder(pid, boxes = 1, silent) {
 function smartOrder() {
   let n = 0, cost = 0;
   for (const p of PRODUCTS) {
-    if (!G.unlocked[p.cat] || !G.carried[p.id]) continue;
+    if (!G.unlocked[p.cat] || !G.carried[p.id] || !displayed(p.id)) continue;
     const inv = G.inv[p.id];
-    if (inv.shelf + inv.back + incoming(p.id) < Math.max(p.box * 0.8, SHELF_CAP)) {
+    if (inv.shelf + inv.back + incoming(p.id) < Math.max(p.box * 0.8, shelfCap(p.id))) {
       const c = costOf(p.id) * p.box;
       if (placeOrder(p.id, 1, true)) { n++; cost += c; }
     }
@@ -103,31 +110,33 @@ function smartOrder() {
 function smartOrderEstimate() {
   let n = 0, cost = 0;
   for (const p of PRODUCTS) {
-    if (!G.unlocked[p.cat] || !G.carried[p.id]) continue;
+    if (!G.unlocked[p.cat] || !G.carried[p.id] || !displayed(p.id)) continue;
     const inv = G.inv[p.id];
-    if (inv.shelf + inv.back + incoming(p.id) < Math.max(p.box * 0.8, SHELF_CAP)) { n++; cost += costOf(p.id) * p.box; }
+    if (inv.shelf + inv.back + incoming(p.id) < Math.max(p.box * 0.8, shelfCap(p.id))) { n++; cost += costOf(p.id) * p.box; }
   }
   return [n, cost];
 }
 
-/** 从仓库搬到货架, 返回上架数量 */
-function restockCat(cat, limit = Infinity) {
+/** 从仓库搬到某个货架 (fid = 货架 id), 返回上架数量 */
+function restockCat(fid, limit = Infinity) {
   let moved = 0;
-  for (const p of PRODUCTS_BY_CAT[cat]) {
+  if (!G.plan || !G.plan[fid]) return 0;
+  for (const p of displayedOn(fid)) {
     const inv = G.inv[p.id];
-    const n = Math.min(SHELF_CAP - inv.shelf, inv.back, limit - moved);
+    const n = Math.min(shelfCap(p.id) - inv.shelf, inv.back, limit - moved);
     if (n > 0) { inv.shelf += n; inv.back -= n; moved += n; }
   }
   return moved;
 }
-function catNeedsRestock(cat, thresh = 0.6) {
-  return PRODUCTS_BY_CAT[cat].some(p => G.carried[p.id] && G.inv[p.id].shelf < SHELF_CAP * thresh && G.inv[p.id].back > 0);
+function catNeedsRestock(fid, thresh = 0.6) {
+  if (!G.plan || !G.plan[fid]) return false;
+  return displayedOn(fid).some(p => G.inv[p.id].shelf < shelfCap(p.id) * thresh && G.inv[p.id].back > 0);
 }
-function catState(cat) {
-  const list = carriedIn(cat);
-  let shelf = 0, back = 0, empty = false;
-  for (const p of list) { shelf += G.inv[p.id].shelf; back += G.inv[p.id].back; if (G.inv[p.id].shelf === 0) empty = true; }
-  return { shelf, cap: list.length * SHELF_CAP, back, empty, n: list.length };
+function catState(fid) {
+  const list = G.plan && G.plan[fid] ? displayedOn(fid) : [];
+  let shelf = 0, back = 0, cap = 0, empty = false;
+  for (const p of list) { const s = Math.min(G.inv[p.id].shelf, shelfCap(p.id)); shelf += s; cap += shelfCap(p.id); back += G.inv[p.id].back; if (s === 0) empty = true; }
+  return { shelf, cap, back, empty, n: list.length };
 }
 
 function unlockCategory(cat) {
@@ -278,12 +287,18 @@ function startDay() {
   G.candidates = G.candidates.filter(() => Math.random() < 0.35);
   const n = randInt(4, 7);
   for (let i = 0; i < n && G.candidates.length < 12; i++) G.candidates.push(genApplicant());
+  // 每日目标: 昨天收入的 1.1 倍
+  const yd = G.fin.today;
+  if (yd && yd.day === G.day - 1) G.goal = Math.max(400, Math.round((yd.sales + (yd.vend || 0)) * 1.1 / 50) * 50);
+  G.goalHit = false;
   G.fin.today = newFinDay();
   for (const v of G.vend || []) v.sold = 0;
   planRain(true);
+  if (typeof generateNews === 'function') generateNews();
 }
 function endDay() {
   const t = G.fin.today;
+  if (!G.goalHit) G.streak = 0;
   t.customers = G.todayCustomers;
   G.fin.history.push(t);
   if (G.fin.history.length > 30) G.fin.history.shift();
@@ -506,7 +521,7 @@ function staffStocker(st, rt, dt) {
       } else if (rt.timer <= 0) {
         const n = restockCat(rt.target);
         if (n > 0 && st.traits.includes('doji') && Math.random() < 0.15) {
-          const ps = carriedIn(rt.target).filter(p => G.inv[p.id].shelf > 0);
+          const ps = displayedOn(rt.target).filter(p => G.inv[p.id].shelf > 0);
           if (ps.length) { const p = pick(ps); G.inv[p.id].shelf--; const [sx, sy] = proj(rt.x, rt.y, 2.1); addFloat(sx, sy, `💥 摔坏了${p.emoji}`, '#ff9f8a'); }
         }
         if (n > 0) { const [sx, sy] = proj(rt.x, rt.y, 2.1); addFloat(sx, sy, `⬆ 上架 ${n}`, '#9ff0c8'); }
@@ -609,9 +624,10 @@ function vendSell(i, p) {
   if (!vm || vm.stock <= 0) return;
   vm.stock--; vm.sold = (vm.sold || 0) + 1;
   G.money = r1(G.money + vm.price); G.fin.today.vend = r1(G.fin.today.vend + vm.price);
+  if (typeof earn === 'function') earn(vm.price);
   const [sx, sy] = proj(VEND_X[i] + 0.42, 6.9, 1.6);
   addFloat(sx, sy, `+¥${vm.price}`, '#9fd3ff');
-  Sound.tone(110, 0, 0.18, 'square', 0.12); Sound.tone(80, 0.08, 0.2, 'square', 0.1);
+  Sound.thump();
   if (vm.stock === 3) toast(`🥫 ${VEND_DEFS[i].name}快卖空了，记得补货`);
 }
 function vendRefill(i) {

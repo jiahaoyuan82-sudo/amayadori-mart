@@ -43,12 +43,14 @@
       <div id="clock">21:00</div>
       <div id="day">第 1 天</div>
     </div>
-    <div class="panel tr">
+    <div class="panel tr" id="hud-money">
       <div class="money">💰 <b id="money">3,000</b> <span>元</span></div>
-      <div id="rep" title="店铺口碑：影响客流量">★★★</div>
-      <div id="today">今日 0 人</div>
+      <div class="income"><span>今日收入</span><b id="income">¥0</b></div>
+      <div class="goal"><div class="gbar"><span id="goalbar"></span></div><div class="gtext"><span id="goaltext">目标 ¥600</span><span id="streak"></span></div></div>
+      <div class="hsub"><span id="rep">★★★</span><span id="today">0 人</span></div>
     </div>
-    <button id="btn-news"><i>📰</i><span>新闻</span><b class="dot-new"></b></button>
+    <button id="btn-news" class="sidebtn"><i>📰</i><span>新闻</span><b class="dot-new"></b></button>
+    <button id="btn-shelf" class="sidebtn"><i>🗂</i><span>管理货架</span><b class="dot-new"></b></button>
     <div id="toolbar">
       <button id="btn-pause"><i>⏸</i><span>暂停</span></button>
       <button id="btn-speed"><i>▶</i><span>1倍速</span></button>
@@ -65,10 +67,12 @@
       💴 点收银台前的客人 = 结账<br>
       👀 看到可疑的人就点他<br>
       📰 每天看新闻调整进货<br>
+      🗂 管理货架：决定每格卖什么<br>
       🎨 菜单里可切换漫画风
     </div>
   </div>
   <div id="toasts"></div>
+  <div id="confetti"></div>
   <div id="modal" class="hidden"><div class="sheet" id="modal-body"></div></div>
 
   <script src="js/iso.js"></script>
@@ -76,6 +80,7 @@
   <script src="js/audio.js"></script>
   <script src="js/world.js"></script>
   <script src="js/people.js"></script>
+  <script src="js/shelves.js"></script>
   <script src="js/sim.js"></script>
   <script src="js/main.js"></script>
   <script src="js/events.js"></script>
