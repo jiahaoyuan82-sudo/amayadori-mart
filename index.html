@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="雨夜便利店">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <title>あまやどりマート · 雨夜便利店</title>
+  <meta name="description" content="日式雨夜便利店经营小游戏 · 等距像素风网页游戏">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- 标题画面 -->
+  <div id="title">
+    <div class="title-card">
+      <div class="logo">☂</div>
+      <h1>あまやどりマート</h1>
+      <p class="sub">AMAYADORI MART · 雨夜便利店</p>
+      <p class="desc">雨宿町三丁目，一家24小时营业的小便利店。<br>进货、招人、看天气备货，把它经营成街坊最爱的店。</p>
+      <div class="btns">
+        <button id="btn-start" class="primary">开店营业</button>
+        <button id="btn-continue" class="hidden">继续上次</button>
+      </div>
+      <p class="hint"><button id="btn-import-title" class="link">📥 导入存档码</button></p>
+    </div>
+  </div>
+
+  <!-- 游戏 HUD -->
+  <div id="hud" class="hidden">
+    <div class="panel tl">
+      <div class="brand">あまやどりマート</div>
+      <div id="clock">21:00</div>
+      <div id="day">第 1 天</div>
+    </div>
+    <div class="panel tr">
+      <div class="money">💰 <b id="money">3,000</b> <span>元</span></div>
+      <div id="rep" title="店铺口碑：影响客流量">★★★</div>
+      <div id="today">今日 0 人</div>
+    </div>
+    <div id="toolbar">
+      <button id="btn-pause"><i>⏸</i><span>暂停</span></button>
+      <button id="btn-speed"><i>▶</i><span>1倍速</span></button>
+      <button id="btn-order"><i>📦</i><span>进货</span></button>
+      <button id="btn-staff"><i>👥</i><span>人员</span></button>
+      <button id="btn-fin"><i>📊</i><span>财报</span></button>
+      <button id="btn-weather"><i>🌤</i><span>天气</span></button>
+      <button id="btn-menu"><i>☰</i><span>菜单</span></button>
+    </div>
+    <div id="help">
+      <b>玩法</b>
+      📦 进货 → 送到仓库<br>
+      ⬆ 点货架 = 从仓库上架<br>
+      💴 点收银台前的客人 = 结账<br>
+      👀 看到可疑的人就点他<br>
+      🎨 菜单里可切换漫画风
+    </div>
+  </div>
+  <div id="toasts"></div>
+  <div id="modal" class="hidden"><div class="sheet" id="modal-body"></div></div>
+
+  <script src="js/iso.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/people.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/main.js"></script>
+  <script src="js/events.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/panels.js"></script>
+</body>
+</html>
