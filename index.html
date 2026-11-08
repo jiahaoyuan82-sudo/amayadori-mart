@@ -747,10 +747,15 @@ body.manga .gd, body.manga .glikes small { color: #333; }
 body.manga .ghours i { background: #555; } body.manga .ghours i.now { background: #111; }
 .ctypes .chip i.dot { width: 8px; min-width: 8px; height: 8px; padding: 0; margin: 0; flex: none; }
 
+/* v10 暗角改用 CSS (手机上更省) */
+#vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(circle farthest-corner at 50% 50%, rgba(0,0,0,0) 52%, rgba(0,0,0,1) 100%); opacity: .25; transition: opacity 1s; }
+body.manga #vignette { display: none; }
+
 </style>
 </head>
 <body>
   <canvas id="game"></canvas>
+  <div id="vignette"></div>
 
   <!-- 标题画面 -->
   <div id="title">
@@ -902,7 +907,7 @@ function poly(pts, fill, stroke) {
   if (MANGA.on) {
     c.strokeStyle = '#111'; c.lineWidth = stroke === false ? 0.5 : 0.9; c.lineJoin = 'round';
     c.stroke();
-  } else if (stroke !== false) {
+  } else if (stroke !== false && !ISO.lite) {
     c.strokeStyle = stroke || fill;
     c.lineWidth = 0.6;
     c.stroke();
@@ -923,7 +928,7 @@ function box(x, y, z, w, d, h, color, o = {}) {
   if (!o.noRight) poly([[x + w, y, z], [x + w, y + d, z], [x + w, y + d, z + h], [x + w, y, z + h]], lit(o.right || color, 0.68, a, amb), st);
   if (!o.noTop) poly([[x, y, z + h], [x + w, y, z + h], [x + w, y + d, z + h], [x, y + d, z + h]], lit(o.top || color, 1, a, amb), st);
   // 顶部前沿高光, 让方块边缘更利落
-  if (!MANGA.on && !o.noTop && a >= 1 && w > 0.12 && d > 0.12 && ISO.zoom > 0.45) {
+  if (!MANGA.on && !ISO.lite && !o.noTop && a >= 1 && w > 0.12 && d > 0.12 && ISO.zoom > 0.45) {
     const c = ISO.ctx, p1 = proj(x, y + d, z + h), p2 = proj(x + w, y + d, z + h), p3 = proj(x + w, y, z + h);
     c.strokeStyle = `rgba(255,255,255,${0.1 + 0.12 * Math.min(1, amb[0])})`; c.lineWidth = 0.9;
     c.beginPath(); c.moveTo(p1[0], p1[1]); c.lineTo(p2[0], p2[1]); c.lineTo(p3[0], p3[1]); c.stroke();
@@ -1927,7 +1932,11 @@ function fixtureItems() {
   for (const C of CATEGORIES) {
     if (C.face === 'hot') continue;
     const [x, y, , w, d] = C.box;
-    if (G.unlocked[C.id]) list.push(item(x, y, x + w, y + d, () => drawFixture(C.id)));
+    if (G.unlocked[C.id]) {
+      const slots = C.face === 'fridge' ? 21 : C.face === 'freezer' ? 12 : C.face === 'mag' ? 10 : 9;
+      const key = unitsFor(C.id, slots).join(',') + '|' + THEME.name + '|' + (C.id === 'daily' ? G.price.umbrella : '') + '|' + !!G.unlocked.hot;
+      list.push(item(x, y, x + w, y + d, () => cachedDraw('fx:' + C.id, key, [x - 0.4, y - 0.4, -0.1, x + w + 0.4, y + d + 0.4, C.box[5] + 1.4], () => drawFixture(C.id))));
+    }
     else if (C.id === 'magazine') list.push(item(x, y, x + w, y + d, () => { box(x, y, 0, w, d, 0.55, '#8a8f96', { amb: AMB_IN }); planeY(x + 0.1, y + d + 0.003, 0.45, g => { g.fillStyle = '#fff'; g.font = `bold 12px ${FONT}`; g.textBaseline = 'top'; g.fillText('準備中 · 敬请期待', 4, 2); }); }));
     else if (C.id === 'ice') list.push(item(x, y, x + w, y + d, () => { box(x, y, 0, w, d, 0.82, '#c9ced4', { amb: AMB_IN }); planeY(x + 0.1, y + d + 0.003, 0.6, g => { g.fillStyle = '#555'; g.font = `bold 12px ${FONT}`; g.textBaseline = 'top'; g.fillText('準備中', 4, 2); }); }));
   }
@@ -2240,7 +2249,10 @@ function buildFrontStatics() {
       if (i % 2) box(px + 0.08, 7.2, 0.62, 0.08, 0.08, 0.08, '#ff8fab');
     }
   }));
-  VEND_X.forEach((x, i) => list.push(item(x, 6.2, x + (i === 2 ? 1.3 : 0.85), 6.9, (env) => drawVending(i, env))));
+  VEND_X.forEach((x, i) => list.push(item(x, 6.2, x + (i === 2 ? 1.3 : 0.85), 6.9, (env) => {
+    const vm = G.vend ? G.vend[i] : VEND_DEFS[i];
+    cachedDraw('vend' + i, [vm.stock, vm.cap, vm.price, (G.temp ?? 15) < 16].join(','), [x - 0.3, 5.9, -0.05, x + 1.7, 7.2, 2.4], () => drawVending(i, env));
+  })));
   for (const y of [2.3, 3.2]) list.push(item(SX1 + 0.1, y, SX1 + 0.75, y + 0.65, () => {
     box(SX1 + 0.1, y, 0, 0.65, 0.65, 0.65, '#d9dcdf', { shadow: true });
     planeX(SX1 + 0.752, y + 0.6, 0.55, g => { g.strokeStyle = lit('#7a8088', 0.68); g.lineWidth = 3; g.beginPath(); g.arc(28, 22, 18, 0, 7); g.stroke(); });
@@ -2384,6 +2396,8 @@ function drawGlows(env, cars) {
 
 /* 暗角 */
 function drawVignette() {
+  const v = document.getElementById('vignette');
+  if (v) { const o = (0.22 + 0.2 * env.night).toFixed(2); if (v._o !== o) { v._o = o; v.style.opacity = o; } return; }
   if (MANGA.on) return;
   const c = ISO.ctx, R = Math.hypot(ISO.W, ISO.H) / 2;
   const g = c.createRadialGradient(ISO.W / 2, ISO.H / 2, R * 0.55, ISO.W / 2, ISO.H / 2, R * 1.05);
@@ -3399,6 +3413,9 @@ function setView(wx, wy, wz, zoom, offY = 0) {
   ISO.panY = -(((wx + wy) * ISO.TH / 2 - wz * ISO.TZ) * zoom) + offY;
 }
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches;
+// 画质: auto(自动) / hd(高清) / smooth(流畅)
+const GFX = { mode: 'auto', NAMES: { auto: '自动', hd: '高清', smooth: '流畅' } };
+try { const m = localStorage.getItem('amayadori-gfx'); if (GFX.NAMES[m]) GFX.mode = m; } catch (e) { }
 const isPortrait = () => ISO.H > ISO.W * 1.05;
 const VIEW_TITLE = () => isPortrait()
   ? [10, 5.6, 1.2, ISO.W / 820, -ISO.H * 0.2]
@@ -3424,7 +3441,8 @@ function updateCam(dt) {
 }
 
 function resize() {
-  ISO.dpr = Math.min(2, window.devicePixelRatio || 1);
+  const q = GFX.mode, base = q === 'smooth' ? 1 : q === 'hd' ? 2 : IS_TOUCH ? 1.5 : 2;
+  ISO.dpr = Math.min(ISO.dprCap || base, base, window.devicePixelRatio || 1);
   ISO.W = window.innerWidth; ISO.H = window.innerHeight;
   canvas.width = Math.round(ISO.W * ISO.dpr);
   canvas.height = Math.round(ISO.H * ISO.dpr);
@@ -3943,16 +3961,12 @@ function update(dt) {
 }
 
 /* ---------------- 渲染 ---------------- */
-function personItem(p) { return { ...personBounds(p), draw: () => drawPerson(p, env) }; }
+function personItem(p) { return { ...personBounds(p), draw: () => { ISO.lite = true; try { drawPerson(p, env); } finally { ISO.lite = false; } } }; }
 
 function render() {
   const c = ctx;
   c.setTransform(ISO.dpr, 0, 0, ISO.dpr, 0, 0);
-  const bg = c.createLinearGradient(0, 0, 0, ISO.H);
-  bg.addColorStop(0, `rgb(${env.bgTop})`); bg.addColorStop(1, `rgb(${env.bgBot})`);
-  c.fillStyle = MANGA.on ? MANGA.tone(lerp(0.97, 0.22, env.night)) : bg; c.fillRect(0, 0, ISO.W, ISO.H);
-  drawBackdrop(env);
-  drawGround(env);
+  drawBackground();
 
   const people = [...G.customers, ...G.passers];
   const staffRT = Object.values(G.staffRT || {});
@@ -3978,17 +3992,77 @@ function render() {
   }
 
   if (typeof eventItems === 'function') for (const it of eventItems()) (it.region === 'in' ? inside : front).push(it);
-  back.sort(depthCmp).forEach(o => o.draw(env));
+  back.filter(onScreen).sort(depthCmp).forEach(o => o.draw(env));
   drawInnerWalls(env);
-  inside.sort(depthCmp).forEach(o => o.draw(env));
-  drawShell(env);
-  front.sort(depthCmp).forEach(o => o.draw(env));
+  inside.filter(onScreen).sort(depthCmp).forEach(o => o.draw(env));
+  cachedDraw('shell', [JSON.stringify(G.posters || []), G.neon, r2(env.cut || 0), Math.round((env.door || 0) * 20), THEME.name, r2(env.night)].join('|'),
+    [STORE.x0 - 1, STORE.y0 - 1, -0.2, STORE.x1 + 1.2, STORE.y1 + 1.8, STORE.H + 2.2], () => drawShell(env));
+  front.filter(onScreen).sort(depthCmp).forEach(o => o.draw(env));
 
   drawGlows(env, G.cars);
   drawRain();
   drawVignette();
   drawUI();
 }
+/* ---------------- 性能: 缓存 / 裁剪 ---------------- */
+// 屏幕外的东西不画 (手机放大时能省很多)
+function onScreen(o) {
+  if (o.x0 == null) return true;
+  const L = proj(o.x0, o.y1, 0)[0], R = proj(o.x1, o.y0, 0)[0];
+  const T = proj(o.x0, o.y0, 7)[1], B = proj(o.x1, o.y1, 0)[1];
+  const m = 60;
+  return R > -m && L < ISO.W + m && B > -m && T < ISO.H + m;
+}
+const r2 = v => Math.round(v * 100);
+function lightKey() { return [AMB, AMB_IN, AMB_EMIT].map(a => a.map(r2).join(',')).join(';'); }
+
+// 天空 + 远景 + 地面: 画到离屏画布, 光线/视角/天气变了才重画
+const BGC = { cv: document.createElement('canvas'), key: '' };
+function drawBackground() {
+  const stars = env.night > 0.3 && env.rain < 0.2 && !MANGA.on;
+  const key = [canvas.width, canvas.height, ISO.dpr, ISO.zoom.toFixed(4), ISO.panX.toFixed(1), ISO.panY.toFixed(1), MANGA.on, THEME.name, env.bgTop, env.bgBot,
+    r2(env.night), r2(env.rain), env.snow, lightKey(), stars ? Math.floor(G.time * 3) : 0].join('|');
+  const cv = BGC.cv;
+  if (key !== BGC.key) {
+    BGC.key = key;
+    if (cv.width !== canvas.width || cv.height !== canvas.height) { cv.width = canvas.width; cv.height = canvas.height; }
+    const g = cv.getContext('2d'), keep = ISO.ctx;
+    g.setTransform(ISO.dpr, 0, 0, ISO.dpr, 0, 0);
+    const bg = g.createLinearGradient(0, 0, 0, ISO.H);
+    bg.addColorStop(0, `rgb(${env.bgTop})`); bg.addColorStop(1, `rgb(${env.bgBot})`);
+    g.fillStyle = MANGA.on ? MANGA.tone(lerp(0.97, 0.22, env.night)) : bg; g.fillRect(0, 0, ISO.W, ISO.H);
+    ISO.ctx = g;
+    try { drawBackdrop(env); drawGround(env); } finally { ISO.ctx = keep; }
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(cv, 0, 0); ctx.setTransform(ISO.dpr, 0, 0, ISO.dpr, 0, 0);
+}
+
+// 把某个物体画成小图片缓存起来 (货架上几十个商品不用每帧重画)
+const SPRITES = new Map();
+function cachedDraw(id, key, b, fn) {
+  const full = key + '|' + ISO.zoom.toFixed(4) + '|' + ISO.dpr + '|' + MANGA.on + '|' + lightKey();
+  // 物体在屏幕上的范围 (相对于原点, 平移视角时不用重画)
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const X of [b[0], b[3]]) for (const Y of [b[1], b[4]]) for (const Z of [b[2], b[5]]) {
+    const p = proj(X, Y, Z); x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]);
+  }
+  const pad = 8, o = proj(0, 0, 0);
+  let s = SPRITES.get(id);
+  if (!s || s.key !== full) {
+    const w = Math.ceil((x1 - x0 + pad * 2) * ISO.dpr), h = Math.ceil((y1 - y0 + pad * 2) * ISO.dpr);
+    if (!s) { s = { cv: document.createElement('canvas') }; SPRITES.set(id, s); }
+    s.key = full; s.cv.width = w; s.cv.height = h;
+    s.dx = x0 - pad - o[0]; s.dy = y0 - pad - o[1];
+    const g = s.cv.getContext('2d'), keep = ISO.ctx;
+    g.setTransform(ISO.dpr, 0, 0, ISO.dpr, -(x0 - pad) * ISO.dpr, -(y0 - pad) * ISO.dpr);
+    ISO.ctx = g;
+    try { fn(); } finally { ISO.ctx = keep; }
+  }
+  ISO.ctx.drawImage(s.cv, o[0] + s.dx, o[1] + s.dy, s.cv.width / ISO.dpr, s.cv.height / ISO.dpr);
+}
+
+// 气泡也缓存成图片 (emoji 文字每帧重新排版很慢)
+const BUBBLES = new Map();
 // 标题画面: 未开始时用默认库存画货架
 function fixtureItemsTitle() { return G.inv ? fixtureItems() : []; }
 
@@ -4001,16 +4075,28 @@ function roundRect(c, x, y, w, h, r) {
 function bubble(sx, sy, text, bg = '#ffffff', fg = '#222', border = null, scale = 1) {
   const c = ctx, k = (IS_TOUCH ? clamp(ISO.zoom * 1.15, 0.95, 1.4) : clamp(ISO.zoom, 0.75, 1.35)) * scale;
   if (MANGA.on) { bg = '#fff'; fg = '#111'; border = '#111'; }
-  c.font = `bold ${Math.round(14 * k)}px ${FONT}`;
-  const w = c.measureText(text).width + 16 * k, h = 24 * k;
-  const x = sx - w / 2, y = sy - h - 8 * k;
-  c.fillStyle = bg; roundRect(c, x, y, w, h, 10 * k); c.fill();
-  c.beginPath(); c.moveTo(sx - 5 * k, y + h - 1); c.lineTo(sx, y + h + 7 * k); c.lineTo(sx + 5 * k, y + h - 1); c.fill();
-  if (border) { c.strokeStyle = border; c.lineWidth = 2; roundRect(c, x, y, w, h, 10 * k); c.stroke(); }
-  c.fillStyle = fg; c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.fillText(text, sx, y + h / 2 + 1);
-  c.textAlign = 'left';
-  return [x, y, w, h];
+  const key = text + '|' + bg + '|' + fg + '|' + border + '|' + k.toFixed(2) + '|' + ISO.dpr;
+  let e = BUBBLES.get(key);
+  if (!e) {
+    c.font = `bold ${Math.round(14 * k)}px ${FONT}`;
+    const w = c.measureText(text).width + 16 * k, h = 24 * k, pad = 3;
+    const cv = document.createElement('canvas');
+    cv.width = Math.ceil((w + pad * 2) * ISO.dpr); cv.height = Math.ceil((h + 8 * k + pad * 2) * ISO.dpr);
+    const g = cv.getContext('2d');
+    g.setTransform(ISO.dpr, 0, 0, ISO.dpr, pad * ISO.dpr, pad * ISO.dpr);
+    g.fillStyle = bg; roundRect(g, 0, 0, w, h, 10 * k); g.fill();
+    g.beginPath(); g.moveTo(w / 2 - 5 * k, h - 1); g.lineTo(w / 2, h + 7 * k); g.lineTo(w / 2 + 5 * k, h - 1); g.fill();
+    if (border) { g.strokeStyle = border; g.lineWidth = 2; roundRect(g, 0, 0, w, h, 10 * k); g.stroke(); }
+    g.font = `bold ${Math.round(14 * k)}px ${FONT}`;
+    g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(text, w / 2, h / 2 + 1);
+    e = { cv, w, h, pad };
+    if (BUBBLES.size > 400) BUBBLES.clear();
+    BUBBLES.set(key, e);
+  }
+  const x = sx - e.w / 2, y = sy - e.h - 8 * k;
+  c.drawImage(e.cv, x - e.pad, y - e.pad, e.cv.width / ISO.dpr, e.cv.height / ISO.dpr);
+  return [x, y, e.w, e.h];
 }
 
 function screenRectOfBox(x, y, z, w, d, h) {
@@ -4870,7 +4956,7 @@ function updateHUD() {
   setText('day', `${dateLabel(G.day)} ${icon} ${Math.round(G.temp ?? 15)}°`);
   // 金额滚动动画
   const shown = hudCache.moneyShown ?? G.money;
-  const nv = Math.abs(G.money - shown) < 0.15 ? G.money : shown + (G.money - shown) * 0.18;
+  const nv = Math.abs(G.money - shown) < 0.15 ? G.money : shown + (G.money - shown) * 0.4;
   hudCache.moneyShown = nv;
   setText('money', yen(nv).replace('¥', ''));
   const inc = r1(G.fin.today.sales + (G.fin.today.vend || 0));
@@ -5003,6 +5089,7 @@ function showMenu() {
       <button data-a="save">💾 立即保存</button>
       <button data-a="sound">${Sound.muted ? '🔇 全部声音：关' : '🔊 全部声音：开'}</button>
       <button data-a="music">${Sound.musicOn ? '🎵 背景音乐：开' : '🎵 背景音乐：关'}</button>
+      <button data-a="gfx" class="wide">🖥 画质：${GFX.NAMES[GFX.mode]}（手机卡就选「流畅」）</button>
       <button data-a="chime" class="wide">🔔 进门铃声：${Sound.CHIMES[Sound.chimeType]}（点击切换并试听）</button>
       <button data-a="roof">🏠 ${G.cutTarget > 0.5 ? '盖上屋顶' : '掀开屋顶'}</button>
       <button data-a="view">⌖ 重置视角</button>
@@ -5016,6 +5103,11 @@ function showMenu() {
   on(b, 'resume', closeModal);
   on(b, 'save', () => { closeModal(); manualSave(); });
   on(b, 'sound', () => { Sound.setMuted(!Sound.muted); showMenuKeepPause(); });
+  on(b, 'gfx', () => {
+    const ks = Object.keys(GFX.NAMES); GFX.mode = ks[(ks.indexOf(GFX.mode) + 1) % ks.length];
+    try { localStorage.setItem('amayadori-gfx', GFX.mode); } catch (e) { }
+    ISO.dprCap = null; resize(); toast('🖥 画质：' + GFX.NAMES[GFX.mode]); showMenuKeepPause();
+  });
   on(b, 'chime', () => {
     const ks = Object.keys(Sound.CHIMES), i = (ks.indexOf(Sound.chimeType) + 1) % ks.length;
     Sound.chimeType = ks[i]; try { localStorage.setItem('amayadori-chime2', ks[i]); } catch (e) { }
@@ -5231,13 +5323,28 @@ for (let i = 0; i < 3; i++) spawnPasser();
 G.passers.forEach((p, i) => { p.x = 2 + i * 5; });
 spawnCar();
 
-let last = performance.now();
+let last = performance.now(), hudT = 0;
+// 自动画质: 手机连续卡顿时, 稍微降低清晰度换流畅
+const PERF = { ema: 16, work: 8, t: 0 };
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  const gap = now - last;
+  const dt = Math.min(0.05, gap / 1000);
   last = now;
+  const t0 = performance.now();
   update(dt);
   render();
-  updateHUD();
+  if (now - hudT > 60) { hudT = now; updateHUD(); }
+  if (gap < 200 && !document.hidden) {
+    PERF.ema += (gap - PERF.ema) * 0.05;
+    PERF.work += (performance.now() - t0 - PERF.work) * 0.05;
+    PERF.t += gap;
+    if (PERF.t > 2500) {
+      PERF.t = 0;
+      const cap = ISO.dprCap || 2, dev = window.devicePixelRatio || 1;
+      const floor = PERF.work > 10 ? 1 : 1.25;
+      if (GFX.mode === 'auto' && PERF.ema > 20 && Math.min(ISO.dpr, dev) > floor) { ISO.dprCap = Math.max(floor, Math.min(ISO.dpr, dev) - 0.25); resize(); PERF.ema = 16; }
+    }
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
