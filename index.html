@@ -750,6 +750,12 @@ body.manga .ghours i { background: #555; } body.manga .ghours i.now { background
 /* v10 暗角改用 CSS (手机上更省) */
 #vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(circle farthest-corner at 50% 50%, rgba(0,0,0,0) 52%, rgba(0,0,0,1) 100%); opacity: .25; transition: opacity 1s; }
 body.manga #vignette { display: none; }
+/* v11 手机: 去掉毛玻璃模糊 (每帧都要重算, 很耗性能), 改成更不透明的底色 */
+@media (pointer: coarse) {
+  * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  :root { --panel: rgba(16, 20, 30, 0.9); }
+}
+body.gfx-smooth * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 
 </style>
 </head>
@@ -1293,6 +1299,11 @@ function pickCustomerType() {
   const h = G.minute / 60, wd = dateOf(G.day).getDay();
   return wpick(CUSTOMER_TYPES, t => t.w(h, wd));
 }
+
+// v11: 售价整体上调约 15%（进价不变），利润更厚
+const PRICE_UP = 1.15;
+for (const p of PRODUCTS) { p.oldPrice = p.price; p.price = Math.round(p.price * PRICE_UP * 2) / 2; }
+for (const v of VEND_DEFS) { v.oldPrice = v.price; v.price = Math.round(v.price * PRICE_UP * 2) / 2; }
 
 </script>
   <script>
@@ -2358,12 +2369,11 @@ function buildBackStatics() {
 }
 
 /* ---------------- 夜间光晕 ---------------- */
-function drawGlows(env, cars) {
+// 固定的灯光 (橱窗/路灯/贩卖机…) 画成一张图缓存, 只有车灯每帧画
+const GLOWC = { cv: document.createElement('canvas'), key: '' };
+function drawStaticGlows(env) {
   const N = env.night;
-  if (N < 0.02 || MANGA.on) return;
   const c = ISO.ctx;
-  c.save();
-  c.globalCompositeOperation = 'lighter';
   // 橱窗光束投在人行道上
   for (const [a, b] of [[3.18, 6.9], [7.0, 8.4], [8.5, SX1 - 0.18]]) {
     const p0 = proj(a, 7.06, 0), p1 = proj(b, 7.06, 0), p2 = proj(b + 0.5, 8.6, 0), p3 = proj(a + 0.5, 8.6, 0);
@@ -2382,6 +2392,25 @@ function drawGlows(env, cars) {
   glowAt(SX1 - 0.45, 6.5, 4.6, 1.3, '120,150,255', 0.35 * N * (1 - 0.88 * env.cut));
   glowAt(2.1, 2.05, 1.4, 1.2, '255,200,140', 0.35 * N);
   glowAt(1.58, 2.12, 1.5, 0.7, '255,80,60', 0.4 * N);
+}
+function drawGlows(env, cars) {
+  const N = env.night;
+  if (N < 0.02 || MANGA.on) return;
+  const c = ISO.ctx;
+  const key = [canvas.width, canvas.height, ISO.dpr, ISO.zoom.toFixed(4), ISO.panX.toFixed(1), ISO.panY.toFixed(1), Math.round(N * 60), G.neon, Math.round((env.cut || 0) * 30), Math.round(env.rain * 20)].join('|');
+  const cv = GLOWC.cv;
+  if (key !== GLOWC.key) {
+    GLOWC.key = key;
+    if (cv.width !== canvas.width || cv.height !== canvas.height) { cv.width = canvas.width; cv.height = canvas.height; }
+    const g = cv.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, cv.width, cv.height);
+    g.setTransform(ISO.dpr, 0, 0, ISO.dpr, 0, 0); g.globalCompositeOperation = 'lighter';
+    const keep = ISO.ctx; ISO.ctx = g;
+    try { drawStaticGlows(env); } finally { ISO.ctx = keep; }
+  }
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(cv, 0, 0); c.setTransform(ISO.dpr, 0, 0, ISO.dpr, 0, 0);
   for (const car of cars) {
     const ax = car.x + car.dir * 1.3;
     if (car.dir > 0) {
@@ -3416,6 +3445,7 @@ const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches;
 // 画质: auto(自动) / hd(高清) / smooth(流畅)
 const GFX = { mode: 'auto', NAMES: { auto: '自动', hd: '高清', smooth: '流畅' } };
 try { const m = localStorage.getItem('amayadori-gfx'); if (GFX.NAMES[m]) GFX.mode = m; } catch (e) { }
+if (document.body) document.body.classList.toggle('gfx-smooth', GFX.mode === 'smooth');
 const isPortrait = () => ISO.H > ISO.W * 1.05;
 const VIEW_TITLE = () => isPortrait()
   ? [10, 5.6, 1.2, ISO.W / 820, -ISO.H * 0.2]
@@ -3480,7 +3510,7 @@ function computeLight() {
 /* ---------------- 雨 ---------------- */
 function initDrops() {
   G.drops = [];
-  const nDrops = Math.min(520, Math.round(ISO.W * ISO.H / 1900));
+  const nDrops = Math.min(GFX.mode === 'smooth' ? 220 : 520, Math.round(ISO.W * ISO.H / (GFX.mode === 'smooth' ? 3800 : 1900)));
   for (let i = 0; i < nDrops; i++) G.drops.push({ x: Math.random() * ISO.W, y: Math.random() * ISO.H, l: rand(10, 22), v: rand(650, 950) });
 }
 function updateRain(dt) {
@@ -3503,10 +3533,12 @@ function drawRain() {
   if (G.snow) {
     c.fillStyle = `rgba(245,248,255,${0.8 * G.rain})`;
     const n = Math.min(G.drops.length, (G.drops.length * G.rain * 0.6) | 0);
+    c.beginPath();
     for (let i = 0; i < n; i++) {
-      const d = G.drops[i], sx = (d.x + Math.sin(G.time * 1.5 + i) * 12) % ISO.W, sy = (d.y * 0.35 + i * 37) % ISO.H;
-      c.beginPath(); c.arc(sx, sy, 1.2 + (i % 3) * 0.7, 0, 7); c.fill();
+      const d = G.drops[i], sx = (d.x + Math.sin(G.time * 1.5 + i) * 12) % ISO.W, sy = (d.y * 0.35 + i * 37) % ISO.H, r = 1.2 + (i % 3) * 0.7;
+      c.moveTo(sx + r, sy); c.arc(sx, sy, r, 0, 7);
     }
+    c.fill();
     return;
   }
   c.strokeStyle = MANGA.on ? (env.night > 0.5 ? `rgba(255,255,255,${0.6 * G.rain})` : `rgba(0,0,0,${0.45 * G.rain})`) : `rgba(200,215,240,${0.35 * G.rain})`; c.lineWidth = 1;
@@ -3561,6 +3593,48 @@ function chooseWants(ct) {
   return [shelf, hot];
 }
 
+/* ---------------- 一次买好几个 ---------------- */
+// 普通客人: 饮料零食之类偶尔拿 2~3 个, 最爱的东西更容易多拿
+const randi = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+function planQty(ids, fav) {
+  const q = {};
+  for (const id of ids) {
+    const p = PRODUCT_BY_ID[id], m = ['drink', 'snack', 'ice', 'rice', 'bread', 'noodle'].includes(p.cat) ? 1 : 0.45;
+    const r = Math.random();
+    let n = r < 0.15 * m ? 2 : r < 0.21 * m ? 3 : 1;
+    if (id === fav && Math.random() < 0.35) n++;
+    q[id] = n;
+  }
+  return q;
+}
+// 偶尔来一个「大采购」的客人: 帮同事带咖啡、开派对、买伴手礼、全家的份…
+const BULK = [
+  { types: ['salary'], line: '帮同事带咖啡～', items: [['coffee', 3, 6], ['tea', 0, 3], ['onigiri_sake', 0, 3]] },
+  { types: ['salary', 'foodie'], line: '部门聚餐的便当！', items: [['bento', 3, 6], ['tea', 2, 6]] },
+  { types: ['student', 'owl', 'casual'], line: '今晚开派对！', items: [['chips', 2, 4], ['cola', 3, 6], ['gummy', 1, 3], ['choco', 0, 3]] },
+  { types: ['owl', 'casual'], line: '看球赛备货中…', items: [['beer', 4, 8], ['chips', 2, 3], ['karaage', 1, 3]] },
+  { types: ['tourist'], line: '给朋友带伴手礼！', items: [['senbei', 2, 5], ['mochiice', 2, 4], ['choco', 2, 4], ['melonpan', 1, 3]] },
+  { types: ['parent'], line: '全家的份～', items: [['water', 2, 4], ['melonpan', 2, 4], ['icebar', 2, 4], ['onigiri_tuna', 2, 4]] },
+  { types: ['healthy', 'elder'], line: '一次买够一周的', items: [['water', 4, 8], ['tea', 3, 6], ['onigiri_ume', 0, 3]] },
+  { types: ['student'], line: '社团活动要用～', items: [['water', 4, 8], ['icebar', 3, 6], ['gummy', 1, 3]] },
+  { types: ['foodie', 'casual'], line: '夜宵大作战！', items: [['cupramen', 2, 4], ['yakisoba', 1, 3], ['karaage', 1, 3], ['nikuman', 1, 3]] },
+];
+function pickBulk(T) {
+  const h = G.minute / 60;
+  if (h < 6 || Math.random() > 0.07) return null;
+  const opts = BULK.filter(b => b.types.includes(T.id));
+  if (!opts.length) return null;
+  const b = pick(opts), q = {};
+  for (const [id, lo, hi] of b.items) {
+    const p = PRODUCT_BY_ID[id];
+    if (!p || !G.carried[id] || !G.unlocked[p.cat]) continue;
+    const n = randi(lo, hi); if (n > 0) q[id] = n;
+  }
+  const ids = Object.keys(q);
+  if (!ids.length || ids.reduce((s, id) => s + q[id], 0) < 4) return null;
+  return { wants: ids.filter(id => PRODUCT_BY_ID[id].cat !== 'hot'), hot: ids.filter(id => PRODUCT_BY_ID[id].cat === 'hot'), qty: q, line: b.line };
+}
+
 function spawnCustomer(opt = {}) {
   const fromLeft = opt.fromLeft ?? Math.random() < 0.5, sx = fromLeft ? 0.05 : BOARD.w - 0.05;
   const T = opt.ctype ? CTYPE_BY_ID[opt.ctype] : pickCustomerType();
@@ -3568,9 +3642,12 @@ function spawnCustomer(opt = {}) {
   const ct = { ...T, fav: T.likes.length && Math.random() < 0.7 ? pick(T.likes) : pick(PRODUCTS).id, sens: T.sens * rand(0.8, 1.2) };
   let [wants, hot] = chooseWants(ct);
   if (opt.wants) { wants = opt.wants.filter(id => PRODUCT_BY_ID[id].cat !== 'hot'); hot = opt.wants.filter(id => PRODUCT_BY_ID[id].cat === 'hot'); }
+  let qty = planQty([...wants, ...hot], ct.fav), bulkLine = null;
+  const bulk = !opt.wants && G.started && pickBulk(T);
+  if (bulk) { wants = bulk.wants; hot = bulk.hot; qty = bulk.qty; bulkLine = bulk.line; }
   const lane = LANE_CUSTOMER + rand(-0.12, 0.12);
   const c = {
-    kind: 'customer', ctype: T.id, fav: ct.fav, sens: ct.sens, x: sx, y: lane, look: opt.look ? { ...randomLook(), ...opt.look } : typeLook(T), wants, hot, got: [],
+    kind: 'customer', ctype: T.id, fav: ct.fav, sens: ct.sens, x: sx, y: lane, look: opt.look ? { ...randomLook(), ...opt.look } : typeLook(T), wants, hot, got: [], qty, bulkLine,
     state: 'walkIn', path: [[DOOR.cx + rand(-0.2, 0.2), lane], [DOOR.cx + rand(-0.15, 0.15), ENTRY_OUT[1]], [DOOR.cx + rand(-0.2, 0.2), ENTRY_IN[1]]], speed: opt.speed || rand(1.35, 1.8) * (T.speed || 1),
     phase: Math.random() * 6, moving: true, dir: [fromLeft ? 1 : -1, 0], alpha: 0, umbrella: G.rain > 0.3 ? 1 : 0,
     timer: 0, patience: 0, mood: 0, bubble: null, bubbleT: 0, exitX: Math.random() < 0.5 ? 0.05 : BOARD.w - 0.05,
@@ -3727,6 +3804,11 @@ function takeItem(c, pid) {
   if (Math.random() > acceptance(pid, c.sens)) return 'price';
   inv.shelf--;
   c.got.push({ pid, price: G.price[pid] });
+  // 想多买几个: 每多拿一个也会再看一眼价格
+  const n = (c.qty && c.qty[pid]) || 1;
+  let k = 1;
+  while (k < n && inv.shelf > 0 && Math.random() < acceptance(pid, c.sens) * 0.97 + 0.03) { inv.shelf--; c.got.push({ pid, price: G.price[pid] }); k++; }
+  if (k > 1) floatAt(c, `${PRODUCT_BY_ID[pid].emoji}×${k}`, '#ffe08a');
   return 'ok';
 }
 
@@ -3805,7 +3887,8 @@ function updateCustomer(c, dt) {
     c.chimed = true; Sound.chime(); G.todayCustomers++;
     const ty = G.fin.today.types || (G.fin.today.types = {}); ty[c.ctype] = (ty[c.ctype] || 0) + 1;
     const T = CTYPE_BY_ID[c.ctype];
-    if (T && T.lines.length && !c.regular && Math.random() < 0.22) sayLater(1.2, c, pick(T.lines));
+    if (c.bulkLine) sayLater(0.8, c, c.bulkLine);
+    else if (T && T.lines.length && !c.regular && Math.random() < 0.22) sayLater(1.2, c, pick(T.lines));
   }
 
   switch (c.state) {
@@ -3930,7 +4013,7 @@ function update(dt) {
   }
 
   G.passT -= adt;
-  if (G.passT <= 0) { spawnPasser(); G.passT = rand(3, 7) / (G.started ? hourTraffic(G.minute / 60) : 1); }
+  if (G.passT <= 0) { if (!(GFX.mode === 'smooth' || IS_TOUCH) || G.passers.length < (GFX.mode === 'smooth' ? 6 : 12)) spawnPasser(); G.passT = rand(3, 7) / (G.started ? hourTraffic(G.minute / 60) : 1); }
   G.carT -= adt;
   if (G.carT <= 0) { spawnCar(); G.carT = rand(4, 10); }
 
@@ -5106,7 +5189,7 @@ function showMenu() {
   on(b, 'gfx', () => {
     const ks = Object.keys(GFX.NAMES); GFX.mode = ks[(ks.indexOf(GFX.mode) + 1) % ks.length];
     try { localStorage.setItem('amayadori-gfx', GFX.mode); } catch (e) { }
-    ISO.dprCap = null; resize(); toast('🖥 画质：' + GFX.NAMES[GFX.mode]); showMenuKeepPause();
+    ISO.dprCap = null; document.body.classList.toggle('gfx-smooth', GFX.mode === 'smooth'); resize(); initDrops(); toast('🖥 画质：' + GFX.NAMES[GFX.mode]); showMenuKeepPause();
   });
   on(b, 'chime', () => {
     const ks = Object.keys(Sound.CHIMES), i = (ks.indexOf(Sound.chimeType) + 1) % ks.length;
@@ -5159,7 +5242,10 @@ function sanitize(d) {
   for (const p of PRODUCTS) {
     const i = d.inv[p.id] || {};
     inv[p.id] = { shelf: Math.round(num(i.shelf, 0, 1e4, 0)), back: Math.round(num(i.back, 0, 1e5, 0)) };
-    price[p.id] = Math.round(num(d.price && d.price[p.id], 10, 1e5, p.price));
+    // 旧存档的价格: 如果还是旧的建议价 (或被旧版存档误改成整数/¥10) → 换成新建议价
+    let pr = num(d.price && d.price[p.id], 0.5, 1000, p.price);
+    if ([p.oldPrice, Math.round(p.oldPrice), Math.max(10, Math.round(p.oldPrice))].some(o => Math.abs(pr - o) < 0.01)) pr = p.price;
+    price[p.id] = Math.round(pr * 2) / 2;
     carried[p.id] = !!(d.carried && d.carried[p.id]);
     costMult[p.id] = num(d.costMult && d.costMult[p.id], 0.5, 2, 1);
   }
@@ -5174,7 +5260,7 @@ function sanitize(d) {
     staff: Array.isArray(d.staff) ? d.staff : [], candidates: Array.isArray(d.candidates) ? d.candidates : [],
     nextId: Math.round(num(d.nextId, 1, 1e9, 1000)), wx: d.wx, fin: d.fin,
     todayTarget: num(d.todayTarget, 0, 1e4, 80), rainTarget: num(d.rainTarget, 0, 1, 0), snow: !!d.snow,
-    vend: VEND_DEFS.map((v, i) => { const s = (d.vend || [])[i] || {}; return { stock: Math.round(num(s.stock, 0, v.cap, 20)), price: num(s.price, 0.5, 100, v.price), cap: v.cap, sold: Math.round(num(s.sold, 0, 1e6, 0)) }; }),
+    vend: VEND_DEFS.map((v, i) => { const s = (d.vend || [])[i] || {}; return { stock: Math.round(num(s.stock, 0, v.cap, 20)), price: Math.abs(num(s.price, 0.5, 100, v.price) - v.oldPrice) < 0.01 ? v.price : num(s.price, 0.5, 100, v.price), cap: v.cap, sold: Math.round(num(s.sold, 0, 1e6, 0)) }; }),
     regulars: d.regulars && typeof d.regulars === 'object' ? d.regulars : {}, buzz: Math.round(num(d.buzz, 0, 9, 0)),
     news: d.news && Array.isArray(d.news.items) ? d.news : null, newsArchive: Array.isArray(d.newsArchive) ? d.newsArchive.slice(0, 7) : [],
     trend: d.trend && typeof d.trend === 'object' ? d.trend : {}, newsSeen: Math.round(num(d.newsSeen, 0, 1e6, 0)),
@@ -5327,6 +5413,8 @@ let last = performance.now(), hudT = 0;
 // 自动画质: 手机连续卡顿时, 稍微降低清晰度换流畅
 const PERF = { ema: 16, work: 8, t: 0 };
 function frame(now) {
+  // 120Hz 手机上最多跑 60 帧, 流畅模式下也一样 (省一半电)
+  if (now - last < 14) { requestAnimationFrame(frame); return; }
   const gap = now - last;
   const dt = Math.min(0.05, gap / 1000);
   last = now;
